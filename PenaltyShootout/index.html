@@ -1,0 +1,486 @@
+<!Doctype html>
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<title>Penalty Shootout</title>
+		<script src= "babylon.js"></script>
+
+		<style>
+
+			html,body,canvas{
+				width:100%;
+				height:100%;
+				padding:0;
+				margin:0;
+				overflow: hidden;
+			}
+		</style>
+	</head>
+	
+	<body>
+		<canvas id = "renderCanvas"></canvas>
+
+		
+
+
+		<script>
+
+			//BABYLON SCRIPT 
+		
+			var canvas = document.getElementById("renderCanvas");
+			var engine = new BABYLON.Engine(canvas, true);
+			
+			var camera;
+			var running = false;
+			var ball;
+			var shootingXAngle;	//direction angle the ball will travel
+			var score;
+			var highscore;
+			var scoreBox;
+			var highscoreBox;
+			var legoman;
+			var fireSystem;		//particle system
+			var smokeSystem;	//particle system
+			var light0;
+
+			var defaultxpos;	//default position used for setting camera pos
+			
+			var leftPost;
+			var crossBar;
+			var rightPost;
+
+			var musicKick;
+			var musicGoal;
+			var musicBackground;
+
+			//pendulum object
+			var pendulum = {
+  				pendulumAnchor: {},
+  				pendulumBall: {}
+			};
+
+			var createScene = function () {
+
+				var Scene = new BABYLON.Scene(engine);
+				Scene.enablePhysics();	//enable scene physics using cannon engine
+
+				//assets setup/creation
+				camera = new BABYLON.ArcRotateCamera("camera", 1,2,20, new BABYLON.Vector3(0,0,0), Scene);
+				camera.setTarget(new BABYLON.Vector3(0, 3.0, 0));
+				//attach camera to scene
+				camera.attachControl(canvas);
+				
+				light0 = new BABYLON.PointLight("Omni",new BABYLON.Vector3(0,15,10), Scene);	//scene lighting
+
+				light1 = new BABYLON.DirectionalLight("dir01", new BABYLON.Vector3(-1, -2, -1), Scene);
+				
+				//CREATE GOAL POSTS
+				leftPost = BABYLON.Mesh.CreateCylinder("Cylinder", 11.5,1.5, 1.5, 10, Scene, false);
+				leftPost.position.x = 14;
+				leftPost.position.z = -32;
+				leftPost.position.y = 4.5;
+				//physics imposter to deal with collions with ball
+				leftPost.physicsImpostor = new BABYLON.PhysicsImpostor(leftPost, BABYLON.PhysicsImpostor.CylinderImpostor, { mass: 0, restitution: 0.9 }, Scene);		
+				
+
+				rightPost = BABYLON.Mesh.CreateCylinder("Cylinder", 11.5,1.5, 1.5, 10, Scene, false);
+				rightPost.position.x = -14.5;
+				rightPost.position.z = -32;
+				rightPost.position.y = 4.5;
+				rightPost.physicsImpostor = new BABYLON.PhysicsImpostor(rightPost, BABYLON.PhysicsImpostor.CylinderImpostor, { mass: 0, restitution: 0.9 }, Scene);
+				
+
+				crossBar = BABYLON.Mesh.CreateCylinder("Cylinder", 27.2,1.5, 1.5, 10, Scene, false);
+				crossBar.position.x = -0.3;
+				crossBar.position.z = -32;
+				crossBar.position.y = 9.57;
+				crossBar.rotation.z = Math.PI/2;
+				crossBar.physicsImpostor = new BABYLON.PhysicsImpostor(crossBar, BABYLON.PhysicsImpostor.CylinderImpostor, { mass: 0, restitution: 0.9 }, Scene);
+				
+
+				
+				//PENDULUM SETUP
+
+				pendulum.pendulumAnchor.mesh = BABYLON.Mesh.CreateSphere("pend_anchor", 8, 2, Scene);
+				pendulum.pendulumAnchor.mesh.position.y = 30;
+				pendulum.pendulumAnchor.mesh.position.z = -29;
+				pendulum.pendulumBall.mesh = BABYLON.Mesh.CreateSphere("pend_ball", 8, 5, Scene);
+				pendulum.pendulumBall.mesh.position.z = -29;
+    
+				pendulum.pendulumAnchor.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(pendulum.pendulumAnchor.mesh, BABYLON.PhysicsImpostor.SphereImpostor, { mass: 0, restitution: 0.9 }, Scene);
+				pendulum.pendulumBall.mesh.physicsImpostor = new BABYLON.PhysicsImpostor(pendulum.pendulumBall.mesh, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 1000, restitution: 0.0 }, Scene);
+				
+				var materialPendBall = new BABYLON.StandardMaterial("gold", Scene);
+  				materialPendBall.diffuseTexture = new BABYLON.Texture("assets/gold.jpg", Scene);
+  				pendulum.pendulumBall.mesh.material = materialPendBall;
+
+  				//distance joint set between anchor and ball pendulum 
+				var distanceJoint = new BABYLON.DistanceJoint({ maxDistance: 26 });
+				pendulum.pendulumAnchor.mesh.physicsImpostor.addJoint(pendulum.pendulumBall.mesh.physicsImpostor, distanceJoint);
+	
+				//adding an impulse to the pendulum ball to swing the pendulum
+				pendulum.pendulumBall.mesh.physicsImpostor.applyImpulse(new BABYLON.Vector3(8000.0, 0, 0), pendulum.pendulumBall.mesh.getAbsolutePosition());
+
+				
+				score = 0;
+				highscore = 0;
+				shootingXAngle = 0;
+				
+				var plane = BABYLON.Mesh.CreatePlane("plane", 80, Scene);
+				plane.position.y = -0.5;
+				plane.rotation.x = Math.PI / 2;
+
+  				var materialPlane = new BABYLON.StandardMaterial("texturePlane", Scene);
+  				materialPlane.diffuseTexture = new BABYLON.Texture("assets/pitch.jpg", Scene);
+  				plane.material = materialPlane;
+  				plane.physicsImpostor = new BABYLON.PhysicsImpostor(plane, BABYLON.PhysicsImpostor.BoxImpostor, { mass: 0, restitution: 0.9 }, Scene);
+
+				// GUI
+
+  				//slider for shooting angle
+
+			    var advancedTexture = BABYLON.GUI.AdvancedDynamicTexture.CreateFullscreenUI("UI");
+
+			    var panel = new BABYLON.GUI.StackPanel();
+			    panel.width = "220px";
+			    panel.horizontalAlignment = BABYLON.GUI.Control.HORIZONTAL_ALIGNMENT_LEFT;
+			    panel.verticalAlignment = BABYLON.GUI.Control.VERTICAL_ALIGNMENT_TOP;
+			    advancedTexture.addControl(panel);
+
+			    var header = new BABYLON.GUI.TextBlock();
+			    header.text = "Angle to shoot";
+			    header.height = "30px";
+			    header.color = "white";
+			    panel.addControl(header); 
+
+			    //SLIDER USED TO SET THE DIRECTION THE BALL WILL TRAVEL
+
+			    var slider = new BABYLON.GUI.Slider();
+			    slider.minimum = -25;
+			    slider.maximum = 25;
+			    slider.value = 0;
+			    slider.height = "20px";
+			    slider.width = "200px";
+			    //FUNCTION THE DETECTS A CHANGE IN THE SLIDER VALUE
+			    //CHANGES THE TEXT ABOVE THE SLIDER TO THE RESPECTIVE NEW VALUE
+			    //ASSIGN THE NEGATIVE OF THE SLIDER VALUE TO THE SHOOTING X VALUE/DIRECTION OF THE BALL 
+			    slider.onValueChangedObservable.add(function(value) {
+			        header.text = "Angle: " + value;
+			        shootingXAngle = -value;
+			        
+			    });
+			    panel.addControl(slider);
+
+			    //shoot button
+
+			    var button = BABYLON.GUI.Button.CreateSimpleButton("but", "Shoot");
+    			
+    			button.height = "40px";
+    			button.width = "100px";
+    			button.color = "white";
+    			button.paddingTop = "10px";
+   				button.background = "green";
+
+   				//ON BUTTON CLICK
+   				//PLAY THE KICK SOUND WHEN THE BALL IS KICKED
+   				//GIVE THE BALL AN IMPULSE
+   				//RESET SLIDER VALUE AND DISABLE PARTICLE EFFECTS
+   				button.onPointerUpObservable.add(function() {
+       				console.log("Clicked");
+       				musicKick.play();
+		    		ball.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(shootingXAngle, 12, -20));
+		    		updatePendulum();
+		    		slider.value = 0;
+		    		fireSystem.stop();
+		    		smokeSystem.stop();
+    			});
+    			panel.addControl(button);
+
+    			scoreBox = new BABYLON.GUI.TextBlock();
+			    scoreBox.text = "Score = 0";
+			    scoreBox.height = "30px";
+			    scoreBox.color = "white";
+			    panel.addControl(scoreBox); 
+
+			    highscoreBox = new BABYLON.GUI.TextBlock();
+			    highscoreBox.text = "Highscore = 0";
+			    highscoreBox.paddingTop = "10px";
+			    highscoreBox.height = "30px";
+			    highscoreBox.color = "white";
+			    panel.addControl(highscoreBox); 
+
+
+
+			   	spawnBall();
+
+
+			    // Skybox
+			    var skybox = BABYLON.Mesh.CreateBox("skyBox", 100.0, Scene);
+			    var skyboxMaterial = new BABYLON.StandardMaterial("skyBox", Scene);
+			    skyboxMaterial.backFaceCulling = false;
+			    skyboxMaterial.reflectionTexture = new BABYLON.CubeTexture("assets/skybox/sky", Scene);
+			    skyboxMaterial.reflectionTexture.coordinatesMode = BABYLON.Texture.SKYBOX_MODE;
+			    skyboxMaterial.diffuseColor = new BABYLON.Color3(0, 0, 0);
+			    skyboxMaterial.specularColor = new BABYLON.Color3(0, 0, 0);
+			    skyboxMaterial.disableLighting = true;
+			    skybox.material = skyboxMaterial;
+
+
+			    // Load the sounds
+    			musicKick = new BABYLON.Sound("kick", "assets/kick.wav", Scene, null, { loop: false, autoplay: false });
+    			musicGoal = new BABYLON.Sound("goal", "assets/goal.wav", Scene, null, { loop: false, autoplay: false });
+    			
+    			
+
+
+			    //PARTICLE SYSTEMS
+			    // Fountain object
+			    var fountain = BABYLON.Mesh.CreateBox("fountain", 2.0, Scene);
+			    fountain.position.x = -17;
+				fountain.position.z = -32;
+				fountain.position.y = 0.2;
+
+			    //Smoke
+				smokeSystem = new BABYLON.ParticleSystem("particles", 1000, Scene);
+				smokeSystem.particleTexture = new BABYLON.Texture("assets/flare.png", Scene);
+				smokeSystem.emitter = fountain; // the starting object, the emitter
+			    smokeSystem.minEmitBox = new BABYLON.Vector3(-0.5, 1, -0.5); // Starting all from
+			    smokeSystem.maxEmitBox = new BABYLON.Vector3(0.5, 1, 0.5); // To...
+				
+				smokeSystem.color1 = new BABYLON.Color4(0.1, 0.1, 0.1, 1.0);
+			    smokeSystem.color2 = new BABYLON.Color4(0.1, 0.1, 0.1, 1.0);
+			    smokeSystem.colorDead = new BABYLON.Color4(0, 0, 0, 0.0);
+				
+				smokeSystem.minSize = 0.3;
+			    smokeSystem.maxSize = 1;
+
+			    smokeSystem.minLifeTime = 0.3;
+			    smokeSystem.maxLifeTime = 1.5;
+
+			    smokeSystem.emitRate = 350;
+
+			    // Blend mode : BLENDMODE_ONEONE, or BLENDMODE_STANDARD
+			    smokeSystem.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
+
+			    smokeSystem.gravity = new BABYLON.Vector3(0, 0, 0);
+
+			    smokeSystem.direction1 = new BABYLON.Vector3(-1.5, 8, -1.5);
+			    smokeSystem.direction2 = new BABYLON.Vector3(1.5, 8, 1.5);
+
+			    smokeSystem.minAngularSpeed = 0;
+				 smokeSystem.maxAngularSpeed = Math.PI;
+
+			    smokeSystem.minEmitPower = 0.5;
+			    smokeSystem.maxEmitPower = 1.5;
+			    smokeSystem.updateSpeed = 0.005;
+				
+			    // Create a particle system
+			    fireSystem = new BABYLON.ParticleSystem("particles", 2000, Scene);
+
+			    //Texture of each particle
+			    fireSystem.particleTexture = new BABYLON.Texture("assets/flare.png", Scene);
+
+			    // Where the particles come from
+			    fireSystem.emitter = fountain; // the starting object, the emitter
+			    fireSystem.minEmitBox = new BABYLON.Vector3(-0.5, 1, -0.5); // Starting all from
+			    fireSystem.maxEmitBox = new BABYLON.Vector3(0.5, 1, 0.5); // To...
+
+			    // Colors of all particles
+			    fireSystem.color1 = new BABYLON.Color4(1, 0.5, 0, 1.0);
+			    fireSystem.color2 = new BABYLON.Color4(1, 0.5, 0, 1.0);
+			    fireSystem.colorDead = new BABYLON.Color4(0, 0, 0, 0.0);
+
+			    // Size of each particle (random between...
+			    fireSystem.minSize = 0.3;
+			    fireSystem.maxSize = 1;
+
+			    // Life time of each particle (random between...
+			    fireSystem.minLifeTime = 0.2;
+			    fireSystem.maxLifeTime = 0.4;
+
+			    // Emission rate
+			    fireSystem.emitRate = 600;
+
+			    // Blend mode : BLENDMODE_ONEONE, or BLENDMODE_STANDARD
+			    fireSystem.blendMode = BABYLON.ParticleSystem.BLENDMODE_ONEONE;
+
+			    // Set the gravity of all particles
+			    fireSystem.gravity = new BABYLON.Vector3(0, 0, 0);
+
+			    // Direction of each particle after it has been emitted
+			    fireSystem.direction1 = new BABYLON.Vector3(0, 4, 0);
+			    fireSystem.direction2 = new BABYLON.Vector3(0, 4, 0);
+
+			    // Angular speed, in radians
+			    fireSystem.minAngularSpeed = 0;
+			    fireSystem.maxAngularSpeed = Math.PI;
+
+			    // Speed
+			    fireSystem.minEmitPower = 1;
+			    fireSystem.maxEmitPower = 3;
+			    fireSystem.updateSpeed = 0.007;
+
+
+			    
+			return Scene;
+			};
+				
+				var Scene = createScene();
+
+				//ACTION MANAAGER USED FOR BUTTTON INPUT FOR TESTING PURPOSES 
+
+				Scene.actionManager = new BABYLON.ActionManager(Scene);
+				Scene.actionManager.registerAction(new BABYLON.ExecuteCodeAction(BABYLON.ActionManager.OnKeyUpTrigger,function (evt) {
+					//CLICK E
+						//SHOOTS BALL BY GIVING IT AN IMPULSE LINEAR VELOCITY
+					if(evt.sourceEvent.key == "e") {
+		    			console.log("Clicked");
+		    			ball.physicsImpostor.setLinearVelocity(new BABYLON.Vector3(shootingXAngle, 12, -20));
+		    			updatePendulum();
+		    		}	
+
+		    		//CLICK J
+		    			//DISPOSE OF THE BALL
+	    			else if(evt.sourceEvent.key == "j"){
+	    				ball.dispose();
+	    			console.log("deleted");
+
+	    			}
+
+	    			//CLICK O
+	    				//DELETES BALL
+	    				//SPAWNS NEW BALL AT RANDOM X POSITION
+	    				//STOPS PARTICLE SYSTEMS
+	    			else if(evt.sourceEvent.key == "o"){
+	    				ball.dispose();
+	    				spawnBall();
+	    				fireSystem.stop();
+	    				smokeSystem.stop();
+	    				console.log("newBall");
+
+	    			}
+	    			
+	    			
+
+		    	}));	
+
+    		
+
+
+				//renders the scene
+				engine.runRenderLoop(function(){
+					Scene.render();
+					//ASSIGN THE CAMERA TARGET TO THE INITIAL POSITION OF THE SPAWNED BALL
+					camera.setTarget(new BABYLON.Vector3(defaultxpos, 4, 8.0));
+					//check if the ball is out of the play area
+					checkNeedForSpawn();	//CHECK IF BALL IS OUT OF BOUNDS
+					updatePendulum();		//KEEP THE PENDULUM GOING BY ASSIGNING IT A SMALL IMPULSE
+					checkScore();			//CHECK FOR A NEW HIGH SCORE
+					
+					
+				});
+
+				//FUNCTION USED FOR SPAWNING A BALL
+
+				function spawnBall(){
+					ball = BABYLON.Mesh.CreateSphere("Ball", 20, 1, 0, Scene);
+					ball.position.x = (Math.floor(Math.random() * (25 - (-25) + 1)) + (-25));	//RANDOM X POSITION
+					defaultxpos = ball.position.x;
+					ball.position.z = 3;
+					ball.position.y = 0.0;
+					var materialBall = new BABYLON.StandardMaterial("textureBall", Scene);		//ASSIGNING A TEXTURE TO THE BALL
+					materialBall.diffuseTexture = new BABYLON.Texture("assets/ball.jpg", Scene);
+					ball.material = materialBall;
+					//GIVING THE BALL PHYSICS IMPOSTER FOR COLLISIONS 
+					ball.physicsImpostor = new BABYLON.PhysicsImpostor(ball, BABYLON.PhysicsImpostor.SphereImpostor, { mass: 2, restitution: 0.9 }, Scene);
+				}
+
+				function updatePendulum(){
+    				pendulum.pendulumBall.mesh.applyImpulse(new BABYLON.Vector3(10.0, 0, 0),pendulum.pendulumBall.mesh.getAbsolutePosition());
+				}
+
+				function checkScore(){
+					if(score >= highscore){
+						highscore = score;
+						highscoreBox.text= "Highscore: " + highscore;
+					}
+				}
+
+				function startParticleEffect(){
+					smokeSystem.start();
+					fireSystem.start();
+					
+				}
+				
+
+				//FUNCTION TO CHECK IF THE BALL IS IN BOUNDS
+				//RESETS SCORE IF BALL IS OUT OF BOUNDS 
+				//DISPOSES BALL AND SPAWNS A NEW ONE
+				//
+				function checkNeedForSpawn(){
+					
+					if(ball.position.z < -40) {
+						score = 0;
+						scoreBox.text= "Score: " + score;
+						ball.dispose();
+						spawnBall();
+						console.log("out from behind");
+						
+					}
+					else if(ball.position.x < -35) {
+						score = 0;
+						scoreBox.text= "Score: " + score;
+						ball.dispose();
+						spawnBall();
+						console.log("out from the side");
+						
+					}
+
+					else if(ball.position.x > 35){
+						score = 0;
+						scoreBox.text= "Score: " + score;
+						ball.dispose();
+						spawnBall();
+						console.log("out from other side");
+					}
+
+					else if(ball.position.z > 10){
+						score = 0;
+						scoreBox.text= "Score: " + score;
+						ball.dispose();
+						spawnBall();
+						console.log("ball out from behind me");
+					}
+
+
+					//check for goal
+					//PLAY THE SOUND SIGNALING THAT A GOAL HAS BEEN SCORED
+					//ENABLE THE PARTICLE EFFECT
+					//INCREMENT THE SCORE
+					else if ((ball.position.x < 14) && (ball.position.x > -14) && (ball.position.z < -35)){
+						console.log("goal");
+						musicGoal.play();
+						startParticleEffect();
+						ball.dispose();
+						spawnBall();
+						score = score + 1;
+						scoreBox.text= "Score: " + score;
+					
+					}	
+					
+				
+				}
+
+
+				//resizes all game objects relative to the window size
+				window.addEventListener("resize", function(){
+					engine.resize();
+				});
+
+
+
+
+
+		</script>
+	</body>
+</html>		
